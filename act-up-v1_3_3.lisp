@@ -302,7 +302,7 @@ API:
                               (value (second (assoc outcome content)))
                               (current (assoc value weighted-list)))
                          (if current (incf (second current) weight)
-                             (push (list value weight) weighted-list))                         
+                             (push (list value weight) weighted-list))
 ;;;                         (incf weighted-average (* weight (second (assoc outcome content))))
                          (incf weighted-sum weight))))))
              memory)
@@ -341,7 +341,7 @@ API:
                               (current (assoc value weighted-list)))
                          (push (list content weight) chunk-list)
                          (if current (incf (second current) weight)
-                             (push (list value weight) weighted-list))                         
+                             (push (list value weight) weighted-list))
 ;;;                         (incf weighted-average (* weight (second (assoc outcome content))))
                          (incf weighted-sum weight))))))
              memory)
@@ -386,7 +386,7 @@ API:
                          (dolist (current weighted-list) ;;; iterate over all possible values
 ;;;                         (if current                  ;;; all values have been initialized
                            (incf (second current) (* weight (square (similarity value (first current))))) ;;; add weighted square similarity error
-;;;                             (push (list value weight) weighted-list))                         
+;;;                             (push (list value weight) weighted-list))
                            (incf weighted-sum weight)))))))
              memory)
     (setf weighted-list (sort weighted-list #'< :key #'second)) ;;; sort by decreasing error
@@ -441,7 +441,7 @@ API:
     best-chunk))
 
 (defun retrieve (conditions &key (mode 'exact) (memory *memory*) (similarities *similarities*) (trace *verbose*))
-  (case mode 
+  (case mode
     (exact (exact-match conditions memory trace))
     (t (partial-match conditions memory similarities trace))))
 
@@ -452,7 +452,3 @@ API:
         (add-reference chunk)
         (setf chunk (create-chunk description memory)))
     chunk))
-
-
-
-
