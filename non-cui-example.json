@@ -1,0 +1,68 @@
+{
+  "simulation_datetime": "sometime",
+  "actions": [
+    {
+      "actors": [
+        "thing"
+      ],
+      "id": "an id",
+      "urn": "a urn",
+      "name": "Move",
+      "inputs": [
+        {
+          "name": "operational-zone",
+          "type": "a type",
+          "value": "a value"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "success",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "actors": [
+        "thing"
+      ],
+      "id": "an id",
+      "urn": "a urn",
+      "name": "Delayed Move",
+      "inputs": [
+        {
+          "name": "operational-zone",
+          "type": "a type",
+          "value": "a value"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "success",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "actors": [
+        "thing"
+      ],
+      "id": "an id",
+      "urn": "a urn",
+      "name": "Escorted Move",
+      "inputs": [
+        {
+          "name": "operational-zone",
+          "type": "a type",
+          "value": "a value"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "success",
+          "type": "boolean"
+        }
+      ]
+    }
+  ]
+}

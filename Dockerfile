@@ -20,11 +20,13 @@ RUN sbcl --quit --load quicklisp.lisp --eval '(quicklisp-quickstart:install :pat
 RUN rm quicklisp.lisp
 
 # copy the relevant code
+COPY act-up-v1_3_3.lisp
+COOY IBL.lisp
 COPY http-server.lisp ./http-server.lisp
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
 RUN chmod a+x docker-entrypoint.sh
 
 # get the dependencies compiled
-RUN sbcl --load quicklisp/setup.lisp --load act-up-v1_3_3 --load 'centipede v1_0' --load http-server.lisp --eval '(sb-ext:exit)'
+RUN sbcl --load quicklisp/setup.lisp --load act-up-v1_3_3 --load IBL --load http-server.lisp --eval '(sb-ext:exit)'
 
 ENTRYPOINT [ "./docker-entrypoint.sh" ]

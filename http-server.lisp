@@ -8,11 +8,11 @@
 ;;; subsequently encounters and error it returns HTTP status 500.
 
 #|
-For local testing and debugging in a SLIME listener:
+For local testing and debugging in a SLIME listener
 (progn
   (swank:set-default-directory "/Users/dfm/work/kallisti/kallisti-actr")
   (load "act-up-v1_3_3")
-  (load "centipede v1_0")
+  (load "IBL")
   (load "http-server")
   (swank:set-package "KALLISTI")
   (funcall (find-symbol "START-SERVER" (find-package "KALLISTI")) :debug nil))
@@ -27,9 +27,8 @@ For local testing and debugging in a SLIME listener:
   (:nicknames :kal)
   (:use :common-lisp :alexandria :iterate)
   (:local-nicknames (:ht :hunchentoot) (:b babel) (:jzon :com.inuoe.jzon) (:v :vom))
-  (:import-from :cl-user
-                #:take #:make-node #:play-centipede #:learn-centipede
-                #:node-actions #:node-utilities #:a #:b)
+  (:import-from :cl-user #:run-ibl #:init-model #:run #:hide
+                         #:state #:opponent #:action #:reaction #:status #:delta)
   (:export #:start-server #:stop-server #:run-standalone))
 
 (in-package :kallisti)
@@ -40,44 +39,12 @@ For local testing and debugging in a SLIME listener:
 (defparameter *debug* nil)
 (defparameter *access-log* "kallisti-actr-access.log")
 
-#-NODEBUG
-(defun readable-jzon (jzon &optional json-format-p)
-  ;; Debugging tool: first value is the result of walking over the results of jzon:parse
-  ;; replacing hash tables with plists; the second is a string of pretty printed JSON.
-  (labels ((%readable-jzon (jz)
-             (etypecase jz
-               ((or symbol string number) jz)
-               (vector (map 'vector #'readable-jzon jz))
-               (hash-table (iter (for (k v) :in-hashtable jz)
-                                 (collect (list k (readable-jzon v))))))))
-    (if json-format-p
-        (jzon:stringify jzon :pretty t)
-        (%readable-jzon jzon) )))
-
-(defun find-obj-hash-table (vector name)
-  (find-if (lambda (x) (equal (gethash "name" x) name)) vector))
-
-(defun jzon-to-node (jzon)
-  (iter (with actions := (gethash "actions" jzon))
-        (with first := (aref actions 0))
-        (with first-inputs := (gethash "inputs" first))
-        (with turn := (gethash "value" (find-obj-hash-table first-inputs "turn")))
-        (with pot :=  (gethash "value" (find-obj-hash-table first-inputs "pot")))
-        (with player := (intern (string-upcase (aref (gethash "actors" first) 0)) :cl-user))
-        (for a :in-vector actions)
-        (for name := (intern (string-upcase (gethash "name" a)) :cl-user))
-        (collect name :into names)
-        (collect (cons name (gethash "id" a)) :into ids)
-        (for ev := (gethash "expected_value" a))
-        (setf ev (and (hash-table-p ev) (gethash "payoff" ev)))
-        (collect (and ev `((,player ,ev)
-                           (,(if (eq player 'a) 'b 'a) ,(- pot ev))))
-          :into utilities)
-        (finally (return (values (make-node :player player
-                                            :state turn
-                                            :actions names
-                                            :utilities utilities)
-                                 ids)))))
+(defun alistify-jzon (jzon)
+  (etypecase jzon
+    ((or symbol string number) jzon)
+    (vector (map 'vector #'alistify-jzon jzon))
+    (hash-table (iter (for (k . v) :in (hash-table-alist jzon))
+                      (collect (cons k (alistify-jzon v)))))))
 
 (defun result-to-jzon (expr id-map)
   (iter (for (move prob) :in expr)
@@ -87,26 +54,43 @@ For local testing and debugging in a SLIME listener:
           :into actions)
         (finally (return (alist-hash-table `(("actions" . , actions)) :test 'equal)))))
 
-(defun game-over (jzon)
-  (when-let* ((a (aref (gethash "actions" jzon) 0))
-              (outputs (and (equal (gethash "status" a) "completed")
-                            (gethash "outputs" a)))
-              (game-over (find-obj-hash-table outputs "game_over"))
-              (game-over-p (gethash "value" game-over))
-              (payoff (find-obj-hash-table outputs "payoff"))
-              (payoff-value (gethash "value" payoff)))
-    payoff-value))
+(defun cassoc (item alist)
+  (cdr (assoc item alist :test #'equalp)))
 
-(defparameter *state-lock* (bt:make-lock "STATE-LOCK"))
-(defparameter *current-simulation-state* nil)
+(define-constant +action-name-map+
+    '(("Move" . run) ("Delayed Move" . hide) ("Escorted Move" . ignore))
+  :test 'equalp)
 
-(defun set-state (value)
-  (bt:with-lock-held (*state-lock*)
-    (setf *current-simulation-state* value)))
+(defparameter *action-map* (make-hash-table :test 'equal))
+(defparameter *action-id-map* (make-hash-table :test 'equal))
 
-(defun get-state ()
-  (bt:with-lock-held (*state-lock*)
-    *current-simulation-state*))
+(defun extract-from-jag (json)
+  (iter (for a :in-vector (cassoc "actions" json))
+        (for id := (cassoc "id" a))
+        (for n := (cassoc "name" a))
+        (setf (gethash n *action-map*) id)
+        (setf (gethash id *action-id-map*) n)
+        (collect (cassoc n +action-name-map+))))
+
+(defparameter *state-history-lock* (bt:make-lock "STATE-LOCK"))
+(defparameter *state-history* nil)
+
+(defun clear-state-history ()
+  (bt:with-lock-held (*state-history-lock*)
+    (setf *state-history* nil)))
+
+(defun add-state-history (value)
+  (bt:with-lock-held (*state-history-lock*)
+    (push value *state-history*)))
+
+(defun get-state-history ()
+  (bt:with-lock-held (*state-history-lock*)
+    *state-history*))
+
+(defun populate-state-history ()
+  ;; TODO just a debugging/testing hack to get something in there until the real stuff is available
+  (clear-state-history)
+  (add-state-history '(state 5 opponent no delta 3)))
 
 (defun error-response (code msg &optional (request-id 'null))
   (setf (ht:return-code*) code)
@@ -130,7 +114,7 @@ For local testing and debugging in a SLIME listener:
           (unless (stringp json)
             (setf json (b:octets-to-string json :encoding :utf-8)))
           (v:debug "received ~A request ~S" name json)
-          (setf json (jzon:parse json)))
+          (setf json (alistify-jzon (jzon:parse json))))
       (error (e)
         (v:error "Error reading or parsing ~A message: ~A" name e)
         (setf result
@@ -148,27 +132,31 @@ For local testing and debugging in a SLIME listener:
     result))
 
 (define-json-handler decision (json)
-  (multiple-value-bind (node id-map) (jzon-to-node json)
-    (v:debug1 "Calling model on ~S" node)
-    (v:debug1 "ID map is ~S" id-map)
-    (let ((result (play-centipede node)))
-      (v:debug1 "model returned ~S" result)
-      (setf result (jzon:stringify (result-to-jzon result id-map)))
-      (v:debug "returning ~S" result)
-      result)))
+  (let* ((actions (extract-from-jag json))
+         ;; this will get more complicated when we have real state data available
+         (state-history (first (get-state-history)))
+         (state (getf state-history 'state))
+         (opponent (getf state-history 'opponent))
+         (delta (getf state-history 'delta))
+         (result (run-ibl `((state ,state) (opponent ,opponent))
+                          `((action ,actions))
+                          `((reaction) (status))
+                          `((delta ,delta)))))
+    (iter (for (m p) :in result)
+          (for n := (car (rassoc m +action-name-map+ :test #'equalp)))
+          (for id := (gethash n *action-map*))
+          (collect (alist-hash-table `(("action_id" . ,id) ("probability" . ,p))) :into probs)
+          (:_ probs)
+          (finally (return (jzon:stringify (coerce probs 'vector)))))))
 
 (define-json-handler jag-status (json 204 nil)
-  (when-let* ((payoff (game-over json))
-              (node (jzon-to-node json)))
-    (setf (node-actions node) nil)
-    (setf (node-utilities node) (list payoff))
-    (learn-centipede node))
+  ;; TODO Is still used for anything? If so it will have to be updated.
+  (v:info "jag-status called: ~S" json)
   nil)
 
-(define-json-handler state-update (data 204 nil)
+(define-json-handler state-update (json 204 nil)
   ;; TODO just a stub for now
-  (set-state data)
-  (v:info "state: ~S" (get-state))
+  (v:info "state-update called: ~S" json)
   nil)
 
 (defvar *server* nil)
@@ -192,12 +180,19 @@ For local testing and debugging in a SLIME listener:
                        ((integerp *debug*) (make-keyword #?"DEBUG${*debug*}"))
                        (t :debug))))
 
+(defun init ()
+  (init-model)
+  (clear-state-history)
+  ;; TODO remove the populate thing when we know what the real state updates will look like
+  (populate-state-history))
+
 (defun start-server (&key (port *port*) debug)
   (enable-debug debug)
   (setf *port* port)
   (when *server*
     (v:warn "Server ~S already running, restarting it" *server*)
     (stop-server))
+  (init) ;; long term will probably be called in somewhere else, but we don't know where yet
   (setf *server* (ht:start (make-instance 'ht:easy-acceptor
                                           :access-log-destination *access-log*
                                           :port port)))
