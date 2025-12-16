@@ -3,6 +3,8 @@
 > The language is that of Mordor, which I will not utter here.
 > – J R R Tolkein, *The Lord of the Rings*
 
+This hunk of code is dedicated to the memory of the Power Macintosh 7100, b. March 24, 1994, d. January 6, 1996.
+
 This is a simple HTTP server implemented in Common Lisp that takes JSON requests using the POST method
 to send a single JSON value, calls a Lisp function on the Lisp version of that value, converts the
 return value of that function to JSON and returns it to the caller. It was created for use in the project who name must not be uttered.
