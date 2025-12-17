@@ -5,7 +5,7 @@
       "actors": [
         "thing"
       ],
-      "id": "an id",
+      "id": "move id",
       "urn": "a urn",
       "name": "Move",
       "inputs": [
@@ -26,7 +26,7 @@
       "actors": [
         "thing"
       ],
-      "id": "an id",
+      "id": "delayed move id",
       "urn": "a urn",
       "name": "Delayed Move",
       "inputs": [
@@ -47,7 +47,7 @@
       "actors": [
         "thing"
       ],
-      "id": "an id",
+      "id": "escorted move id",
       "urn": "a urn",
       "name": "Escorted Move",
       "inputs": [

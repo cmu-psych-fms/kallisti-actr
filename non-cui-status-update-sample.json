@@ -1,0 +1,1 @@
+[{"id":"supply_change","isa":"world_state","value":17},{"id":"supply_level","isa":"world_state","value":80},{"id":"friend_ship_available","isa":"world_state","value":false},{"id":"red_at_objective","isa":"world_state","value":true}]

@@ -10,7 +10,7 @@
 #|
 For local testing and debugging in a SLIME listener
 (progn
-  (swank:set-default-directory "/Users/dfm/work/bha/bha-actr")
+  (swank:set-default-directory "/Users/dfm/work/.../bha-actr")
   (load "act-up-v1_3_3")
   (load "IBL")
   (load "http-server")
@@ -26,8 +26,9 @@ For local testing and debugging in a SLIME listener
 (defpackage :bha
   (:use :common-lisp :alexandria :iterate)
   (:local-nicknames (:ht :hunchentoot) (:b babel) (:jzon :com.inuoe.jzon) (:v :vom))
-  (:import-from :cl-user #:run-ibl #:init-model #:run #:hide
-                         #:state #:opponent #:action #:reaction #:status #:delta)
+  (:import-from :cl-user #:run-ibl #:learn-ibl #:init-model
+                         #:move #:delayed-move #:escorted-move #:yes #:no
+                         #:state #:foe #:friend #:delta #:action #:status)
   (:export #:start-server #:stop-server #:run-standalone))
 
 (in-package :bha)
@@ -45,25 +46,50 @@ For local testing and debugging in a SLIME listener
     (hash-table (iter (for (k . v) :in (hash-table-alist jzon))
                       (collect (cons k (alistify-jzon v)))))))
 
-(defun result-to-jzon (expr id-map)
-  (iter (for (move prob) :in expr)
-        (collect (alist-hash-table `(("action_id" . ,(cdr (assoc move id-map)))
-                                     ("probability" . ,(float prob)))
-                                   :test 'equal)
-          :into actions)
-        (finally (return (alist-hash-table `(("actions" . , actions)) :test 'equal)))))
-
 (defun cassoc (item alist)
   (cdr (assoc item alist :test #'equalp)))
 
+(defun sequence-id-value (seq id &optional default)
+  (if-let ((obj (find-if (lambda (o) (equalp (cassoc "name" o) id)) seq)))
+    (or (cassoc "value" obj) default)
+    default))
+
+(define-constant +initial-world-state+ '(:state 100 :foe nil :friend t :delta 0) :test #'equal)
+
+(defparameter *world-state* +initial-world-state+)
+(defparameter *world-state-lock* (bt:make-lock "WORLD-STATE-LOCK"))
+
+(defmacro with-world-state (() &body body)
+  `(%with-world-state (lambda () ,@body)))
+
+(defun %with-world-state (thunk)
+  (bt:with-lock-held (*world-state-lock*)
+    (funcall thunk)))
+
+(defun init-world-state ()
+  (with-world-state ()
+    (setf *world-state* +initial-world-state+)))
+
+(defun wsget (key)
+  (with-world-state ()
+    (getf *world-state* key)))
+
+(defun update-world-state (&rest args &key state foe friend delta)
+  (declare (ignore state foe friend delta))
+  (with-world-state ()
+    (iter (for (k v) :on args :by #'cddr)
+          (setf (getf *world-state* k) v))))
+
 (define-constant +action-name-map+
-    '(("Move" . run) ("Delayed Move" . hide) ("Escorted Move" . ignore))
+    '(("Move" . move) ("Delayed Move" . delayed-move) ("Escorted Move" . escorted-move))
   :test 'equalp)
 
 (defparameter *action-map* (make-hash-table :test 'equal))
 (defparameter *action-id-map* (make-hash-table :test 'equal))
 
-(defun extract-from-jag (json)
+(defun extract-jag-request-data (json)
+  ;; Currently returns just a list action names, having added them and their IDs
+  ;; to the relevant maps, above.
   (iter (for a :in-vector (cassoc "actions" json))
         (for id := (cassoc "id" a))
         (for n := (cassoc "name" a))
@@ -71,25 +97,16 @@ For local testing and debugging in a SLIME listener
         (setf (gethash id *action-id-map*) n)
         (collect (cassoc n +action-name-map+))))
 
-(defparameter *state-history-lock* (bt:make-lock "STATE-LOCK"))
-(defparameter *state-history* nil)
+(defun extract-jag-status-data (json)
+  (let ((a (aref (cassoc "actions" json) 0)))
+    (values (sequence-id-value (cassoc "outputs" a) "success")
+            (gethash (cassoc "id" a) *action-id-map*))))
 
-(defun clear-state-history ()
-  (bt:with-lock-held (*state-history-lock*)
-    (setf *state-history* nil)))
-
-(defun add-state-history (value)
-  (bt:with-lock-held (*state-history-lock*)
-    (push value *state-history*)))
-
-(defun get-state-history ()
-  (bt:with-lock-held (*state-history-lock*)
-    *state-history*))
-
-(defun populate-state-history ()
-  ;; TODO just a debugging/testing hack to get something in there until the real stuff is available
-  (clear-state-history)
-  (add-state-history '(state 5 opponent no delta 3)))
+(defun extract-commander-data (json)
+  (iter (for (key id) :on '(:state "supply_level" :foe "red_at_objective"
+                            :friend "friend_ship_available" :delta "supply_change")
+             :by #'cddr)
+        (nconcing (list key (sequence-id-value json id (getf +initial-world-state+ key))))))
 
 (defun error-response (code msg &optional (request-id 'null))
   (setf (ht:return-code*) code)
@@ -131,16 +148,11 @@ For local testing and debugging in a SLIME listener
     result))
 
 (define-json-handler decision (json)
-  (let* ((actions (extract-from-jag json))
-         ;; this will get more complicated when we have real state data available
-         (state-history (first (get-state-history)))
-         (state (getf state-history 'state))
-         (opponent (getf state-history 'opponent))
-         (delta (getf state-history 'delta))
-         (result (run-ibl `((state ,state) (opponent ,opponent))
+  (let* ((actions (extract-jag-request-data json))
+         (result (run-ibl `((state ,(wsget :state)) (foe ,(wsget :foe)))
                           `((action ,actions))
-                          `((reaction) (status))
-                          `((delta ,delta)))))
+                          `((status))
+                          `((delta ,(wsget :delta))))))
     (iter (for (m p) :in result)
           (for n := (car (rassoc m +action-name-map+ :test #'equalp)))
           (for id := (gethash n *action-map*))
@@ -148,13 +160,15 @@ For local testing and debugging in a SLIME listener
           (finally (return (jzon:stringify (coerce probs 'vector)))))))
 
 (define-json-handler jag-status (json 204 nil)
-  ;; TODO Is still used for anything? If so it will have to be updated.
-  (v:info "jag-status called: ~S" json)
+  (multiple-value-bind (success action) (extract-jag-status-data json)
+    (learn-ibl `((state ,(wsget :state)) (foe ,(wsget :foe)))
+               `((action (,action)))
+               `((status))
+               `((delta ,(wsget :delta)))))
   nil)
 
 (define-json-handler state-update (json 204 nil)
-  ;; TODO just a stub for now
-  (v:info "state-update called: ~S" json)
+  (apply #'update-world-state (extract-commander-data json))
   nil)
 
 (defvar *server* nil)
@@ -180,9 +194,9 @@ For local testing and debugging in a SLIME listener
 
 (defun init ()
   (init-model)
-  (clear-state-history)
-  ;; TODO remove the populate thing when we know what the real state updates will look like
-  (populate-state-history))
+  (init-world-state)
+  (clrhash *action-map*)
+  (clrhash *action-id-map*))
 
 (defun start-server (&key (port *port*) debug)
   (enable-debug debug)
