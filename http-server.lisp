@@ -26,7 +26,7 @@ For local testing and debugging in a SLIME listener
 (defpackage :bha
   (:use :common-lisp :alexandria :iterate)
   (:local-nicknames (:ht :hunchentoot) (:b babel) (:jzon :com.inuoe.jzon) (:v :vom))
-  (:import-from :cl-user #:run-ibl #:learn-ibl #:init-model
+  (:import-from :cl-user #:run-ibl #:learn-ibl #:init-model #:success #:failure
                          #:move #:delayed-move #:escorted-move #:yes #:no
                          #:state #:foe #:friend #:delta #:action #:status)
   (:export #:start-server #:stop-server #:run-standalone))
@@ -52,7 +52,7 @@ For local testing and debugging in a SLIME listener
 (defun sequence-name-value (seq id &optional name-is-id default)
   (if-let ((obj (find-if (lambda (o) (equalp (cassoc (if name-is-id "id" "name") o) id))
                          seq)))
-    (or (cassoc "value" obj) default)
+    (cassoc "value" obj)
     default))
 
 (defun yes-or-no (bool)
@@ -104,7 +104,7 @@ For local testing and debugging in a SLIME listener
 (defun extract-jag-status-data (json)
   (let ((a (aref (cassoc "actions" json) 0)))
     (values (sequence-name-value (cassoc "outputs" a) "success")
-            (gethash (cassoc "id" a) *action-id-map*))))
+            (cassoc (gethash (cassoc "id" a) *action-id-map*) +action-name-map+))))
 
 (defun extract-commander-data (json)
   (iter (for (key id) :on '(:state "supply_level" :foe "red_at_objective"
@@ -171,7 +171,7 @@ For local testing and debugging in a SLIME listener
                  (foe ,(yes-or-no (wsget :foe)))
                  (friend ,(yes-or-no (wsget :friend))))
                `((action (,action)))
-               `((status ,(yes-or-no success)))
+               `((status ,(if success 'success 'failure)))
                `((delta ,(wsget :delta)))))
   nil)
 

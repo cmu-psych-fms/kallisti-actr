@@ -5,9 +5,9 @@
       "actors": [
         "thing"
       ],
-      "id": "an id",
+      "id": "delayed move id",
       "urn": "a urn",
-      "name": "Move",
+      "name": "Delayed Move",
       "inputs": [
         {
           "name": "operational-zone",
