@@ -170,7 +170,7 @@ For local testing and debugging in a SLIME listener
     (learn-ibl `((state ,(wsget :state))
                  (foe ,(yes-or-no (wsget :foe)))
                  (friend ,(yes-or-no (wsget :friend))))
-               `((action (,action)))
+               `((action ,action))
                `((status ,(if success 'success 'failure)))
                `((delta ,(wsget :delta)))))
   nil)
